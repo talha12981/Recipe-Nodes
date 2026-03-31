@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CHEF + AIR — Version Pinning</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  
+  <!-- Core Cytoscape -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <!-- Dagre Layout for strictly LR hierarchical graphs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-dagre/2.5.0/cytoscape-dagre.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+      background: #F8F9FC;
+      color: #1E293B;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ───────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #C7D2FE;
+      flex-shrink: 0;
+      gap: 12px;
+    }
+    .header-left h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #4338CA;
+      letter-spacing: 0.3px;
+    }
+    .header-left p { font-size: 11px; color: #64748B; margin-top: 1px; }
+    .header-stats {
+      display: flex;
+      gap: 16px;
+    }
+    .stat { text-align: center; }
+    .stat-val { font-size: 18px; font-weight: 700; color: #6D28D9; line-height: 1; }
+    .stat-lbl { font-size: 10px; color: #94A3B8; margin-top: 2px; }
+
+    /* ── Toolbar ──────────────────────────── */
+    #toolbar {
+      background: #FFFFFF;
+      padding: 7px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #E2E8F0;
+      flex-shrink: 0;
+    }
+    .btn {
+      padding: 4px 11px;
+      border-radius: 6px;
+      border: 1px solid #CBD5E1;
+      background: #F8FAFC;
+      color: #475569;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: #EEF2FF; border-color: #818CF8; color: #4338CA; }
+    .btn.active { background: #EEF2FF; border-color: #6366F1; color: #4338CA; }
+    .btn-accent { border-color: #6EE7B7; background: #ECFDF5; color: #065F46; }
+    .btn-accent:hover { background: #D1FAE5; }
+    .sep { width: 1px; height: 18px; background: #E2E8F0; flex-shrink: 0; }
+
+    #search-wrap { position: relative; margin-left: auto; }
+    #search {
+      background: #F8FAFC;
+      border: 1px solid #CBD5E1;
+      border-radius: 6px;
+      color: #1E293B;
+      font-size: 11px;
+      font-family: inherit;
+      padding: 4px 10px 4px 26px;
+      width: 160px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #search:focus { border-color: #818CF8; }
+    #search::placeholder { color: #94A3B8; }
+    #search-wrap::before {
+      content: "⌕";
+      position: absolute;
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94A3B8;
+      font-size: 13px;
+      pointer-events: none;
+    }
+
+    /* ── Legend ───────────────────────────── */
+    #legend-bar {
+      background: #F1F5F9;
+      padding: 5px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #E2E8F0;
+      flex-shrink: 0;
+    }
+    .leg-group { display: flex; align-items: center; gap: 10px; }
+    .leg-sep { width: 1px; height: 14px; background: #CBD5E1; }
+    .leg { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #64748B; cursor: default; }
+    .l-node { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+    .l-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .l-edge { width: 18px; height: 2px; flex-shrink: 0; border-radius: 1px; }
+    .l-edge-dashed { width: 18px; height: 0; border-top: 2px dashed; flex-shrink: 0; }
+
+    /* ── Main ─────────────────────────────── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    #cy {
+      flex: 1;
+      background: radial-gradient(ellipse at 30% 40%, #EEF2FF 0%, #F8F9FC 70%);
+    }
+
+    /* ── Side Panel ───────────────────────── */
+    #panel {
+      width: 280px;
+      background: #FFFFFF;
+      border-left: 1px solid #E2E8F0;
+      overflow-y: auto;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    #panel-header {
+      padding: 12px 16px 8px;
+      border-bottom: 1px solid #E2E8F0;
+      background: #F8FAFC;
+      flex-shrink: 0;
+    }
+    #panel-header h2 {
+      font-size: 10px;
+      color: #94A3B8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    #panel-node-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #4338CA;
+      margin-top: 4px;
+      line-height: 1.3;
+    }
+    #panel-type-badge {
+      font-size: 10px;
+      color: #64748B;
+      margin-top: 4px;
+    }
+    #panel-body { padding: 12px 16px; flex: 1; }
+    #panel-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: #CBD5E1;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .pfield { margin-bottom: 12px; }
+    .pkey {
+      font-size: 10px;
+      font-weight: 600;
+      color: #7C3AED;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .pval { font-size: 11px; color: #334155; line-height: 1.5; background: #F8FAFC; padding: 6px 8px; border-radius: 4px; border: 1px solid #E2E8F0;}
+    
+    .chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 500;
+      margin: 2px 2px 0 0;
+    }
+    .chip-global  { background: #ECFDF5; border: 1px solid #6EE7B7; color: #065F46; }
+    .chip-org     { background: #EFF6FF; border: 1px solid #BFDBFE; color: #1D4ED8; }
+    .chip-draft   { background: #F8FAFC; border: 1px solid #CBD5E1; color: #64748B; }
+    .chip-major   { background: #FFF7ED; border: 1px solid #FED7AA; color: #C2410C; }
+    .chip-minor   { background: #EFF6FF; border: 1px solid #BFDBFE; color: #1D4ED8; }
+    .chip-initial { background: #F1F5F9; border: 1px solid #CBD5E1; color: #64748B; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>CHEF + AIR — Version Pinning</h1>
+    <p>Recipe versions mapped to immutable attribute snapshots (Left-to-Right)</p>
+  </div>
+  <div class="header-stats">
+    <div class="stat"><div class="stat-val">3</div><div class="stat-lbl">Recipe Versions</div></div>
+    <div class="stat"><div class="stat-val">6</div><div class="stat-lbl">Attribute Versions</div></div>
+    <div class="stat"><div class="stat-val">6</div><div class="stat-lbl">Hard Pins</div></div>
+  </div>
+</header>
+
+<div id="toolbar">
+  <button class="btn btn-accent" onclick="runLayout()">Re-Layout (Dagre)</button>
+  <div class="sep"></div>
+  <button class="btn" id="btn-toggle-pins" onclick="toggleEdges('pins')">Hide Pins</button>
+  <button class="btn" id="btn-toggle-forks" onclick="toggleEdges('fork')">Hide Forks</button>
+  <button class="btn" id="btn-toggle-updates" onclick="toggleEdges('next_version')">Hide Minor/Major</button>
+  <div class="sep"></div>
+  <button class="btn" onclick="cy.fit(cy.elements(), 40)">Fit View</button>
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search node…" oninput="searchNodes(this.value)" />
+  </div>
+</div>
+
+<div id="legend-bar">
+  <div class="leg-group">
+    <span style="font-size:10px;color:#64748B;font-weight:600;">NODES</span>
+    <div class="leg"><div class="l-node" style="background:#059669"></div>Global Recipe</div>
+    <div class="leg"><div class="l-node" style="background:#2563EB"></div>Org Recipe</div>
+    <div class="leg"><div class="l-node" style="background:#94A3B8"></div>Draft</div>
+    <div class="leg-sep" style="margin: 0 4px"></div>
+    <div class="leg"><div class="l-dot" style="background:#E2E8F0;border:1px solid #94A3B8"></div>Initial</div>
+    <div class="leg"><div class="l-dot" style="background:#BFDBFE;border:1px solid #3B82F6"></div>Minor Change</div>
+    <div class="leg"><div class="l-dot" style="background:#FED7AA;border:1px solid #F97316"></div>Major Change</div>
+  </div>
+  <div class="leg-sep"></div>
+  <div class="leg-group">
+    <span style="font-size:10px;color:#64748B;font-weight:600;">EDGES</span>
+    <div class="leg"><div class="l-edge-dashed" style="border-color:#34D399"></div>forked</div>
+    <div class="leg"><div class="l-edge" style="background:#64748B"></div>minor/major update</div>
+    <div class="leg"><div class="l-edge-dashed" style="border-color:#A78BFA; border-width: 2px"></div>pins snapshot</div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="cy"></div>
+
+  <div id="panel">
+    <div id="panel-header">
+      <h2>Node Inspector</h2>
+      <div id="panel-node-name">—</div>
+      <div id="panel-type-badge"></div>
+    </div>
+    <div id="panel-body">
+      <div id="panel-empty">
+        Click any node to inspect details.
+      </div>
+      <div id="panel-content" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Node & Edge definitions mapped from Mermaid LR ────────────────────────────
+
+const NODES = [
+  // ── Compound Nodes (Subgraphs) ──
+  { id: 'FAM', type: 'parent', label: 'Recipe Family — Senior React Developer · Acme Corp' },
+  { id: 'AIR', type: 'parent', label: 'AIR Attributes Ecosystem' },
+  { id: 'A1', type: 'parent', label: 'React 18 (attr_react_18)', parentId: 'AIR' },
+  { id: 'A2', type: 'parent', label: 'TypeScript (attr_typescript)', parentId: 'AIR' },
+  { id: 'A3', type: 'parent', label: 'React Hooks (attr_react_hooks)', parentId: 'AIR' },
+
+  // ── Recipe Versions ──
+  {
+    id: 'rv1', type: 'version_pub_org', parentId: 'FAM',
+    label: 'v1 · Org',
+    display: 'v1 · Published · Org',
+    detail: { 'Date': 'Jan 15 2026', 'Status': 'Published (Org visibility)', 'Pins': 'react@v1, ts@v1, hooks@v1' }
+  },
+  {
+    id: 'rv2', type: 'version_pub_global', parentId: 'FAM',
+    label: 'v2 · Global',
+    display: 'v2 · Published · Global',
+    detail: { 'Date': 'Mar 15 2026', 'Market': 'MarketOne', 'Status': 'Promoted to Global', 'Pins': 'react@v2, ts@v2, hooks@v1' }
+  },
+  {
+    id: 'rv3', type: 'version_draft', parentId: 'FAM',
+    label: 'v3 · Draft',
+    display: 'v3 · Active Draft',
+    detail: { 'Status': 'In progress', 'Notes': 'No snapshot captured yet.' }
+  },
+
+  // ── Attribute Versions ──
+  {
+    id: 'av1_1', type: 'attr_v_initial', parentId: 'A1',
+    label: 'v1 · Initial', display: 'React 18 (v1)',
+    detail: { 'Change': 'Initial Creation', 'Expiration': '730 days' }
+  },
+  {
+    id: 'av1_2', type: 'attr_v_minor', parentId: 'A1',
+    label: 'v2 · Minor', display: 'React 18 (v2)',
+    detail: { 'Change': 'Expiration updated: 730d → 365d', 'Type': 'MINOR update' }
+  },
+  {
+    id: 'av1_3', type: 'attr_v_major', parentId: 'A1',
+    label: 'v3 · Major', display: 'React 18 (v3)',
+    detail: { 'Change': 'cognitiveType: applied → procedural', 'Type': 'MAJOR update (taxonomy reclassification)' }
+  },
+  
+  {
+    id: 'av2_1', type: 'attr_v_initial', parentId: 'A2',
+    label: 'v1 · Initial', display: 'TypeScript (v1)',
+    detail: { 'Change': 'Initial Creation', 'Expiration': 'No expiry' }
+  },
+  {
+    id: 'av2_2', type: 'attr_v_minor', parentId: 'A2',
+    label: 'v2 · Minor', display: 'TypeScript (v2)',
+    detail: { 'Change': 'Description enriched after Q1 review', 'Type': 'MINOR update' }
+  },
+
+  {
+    id: 'av3_1', type: 'attr_v_initial', parentId: 'A3',
+    label: 'v1 · Initial', display: 'React Hooks (v1)',
+    detail: { 'Change': 'Initial Creation', 'Status': 'Stable — no changes yet' }
+  }
+];
+
+const EDGES = [
+  // Forks
+  { id: 'e_f1', source: 'rv1', target: 'rv2', type: 'fork', label: 'fork' },
+  { id: 'e_f2', source: 'rv2', target: 'rv3', type: 'fork', label: 'fork' },
+
+  // Updates
+  { id: 'e_a1_1', source: 'av1_1', target: 'av1_2', type: 'next_version', label: 'minor' },
+  { id: 'e_a1_2', source: 'av1_2', target: 'av1_3', type: 'next_version', label: 'major' },
+  { id: 'e_a2_1', source: 'av2_1', target: 'av2_2', type: 'next_version', label: 'minor' },
+
+  // Pins (RV to AV)
+  { id: 'p_rv1_a1', source: 'rv1', target: 'av1_1', type: 'pins', label: 'pins react@v1' },
+  { id: 'p_rv1_a2', source: 'rv1', target: 'av2_1', type: 'pins', label: 'pins ts@v1' },
+  { id: 'p_rv1_a3', source: 'rv1', target: 'av3_1', type: 'pins', label: 'pins hooks@v1' },
+  
+  { id: 'p_rv2_a1', source: 'rv2', target: 'av1_2', type: 'pins', label: 'pins react@v2' },
+  { id: 'p_rv2_a2', source: 'rv2', target: 'av2_2', type: 'pins', label: 'pins ts@v2' },
+  { id: 'p_rv2_a3', source: 'rv2', target: 'av3_1', type: 'pins', label: 'pins hooks@v1' }
+];
+
+const NODE_MAP = Object.fromEntries(NODES.map(n => [n.id, n]));
+const state = { pins: true, fork: true, next_version: true };
+
+// ── Cytoscape Initialization ──────────────────────────────────────────────────
+function buildElements() {
+  const elements = [];
+  for (const n of NODES) {
+    elements.push({
+      data: { id: n.id, label: n.label, type: n.type, parent: n.parentId || undefined }
+    });
+  }
+  for (const e of EDGES) {
+    elements.push({
+      data: { id: e.id, source: e.source, target: e.target, type: e.type, label: e.label }
+    });
+  }
+  return elements;
+}
+
+const TYPE_COLOR = {
+  version_pub_global: { bg: '#059669', border: '#047857', fg: '#FFFFFF', shape: 'round-rectangle', w: 120, h: 42 },
+  version_pub_org:    { bg: '#2563EB', border: '#1D4ED8', fg: '#FFFFFF', shape: 'round-rectangle', w: 120, h: 42 },
+  version_draft:      { bg: '#94A3B8', border: '#64748B', fg: '#FFFFFF', shape: 'round-rectangle', w: 120, h: 42 },
+  attr_v_initial:     { bg: '#E2E8F0', border: '#94A3B8', fg: '#475569', shape: 'ellipse', w: 90, h: 40 },
+  attr_v_minor:       { bg: '#BFDBFE', border: '#3B82F6', fg: '#1D4ED8', shape: 'ellipse', w: 90, h: 40 },
+  attr_v_major:       { bg: '#FED7AA', border: '#F97316', fg: '#7C2D12', shape: 'ellipse', w: 90, h: 40 },
+};
+
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: buildElements(),
+  style: [
+    {
+      selector: 'node',
+      style: {
+        'label': 'data(label)',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '11px',
+        'font-family': '"Inter", sans-serif',
+        'font-weight': '600',
+        'border-width': 1.5,
+        'transition-property': 'opacity, border-color, border-width',
+        'transition-duration': '0.15s',
+      }
+    },
+    ...Object.entries(TYPE_COLOR).map(([type, c]) => ({
+      selector: `node[type = "${type}"]`,
+      style: {
+        'background-color': c.bg,
+        'border-color': c.border,
+        'color': c.fg,
+        'shape': c.shape,
+        'width': c.w,
+        'height': c.h,
+      }
+    })),
+    // Compound Parent Styling
+    {
+      selector: ':parent',
+      style: {
+        'background-color': '#F8FAFC',
+        'background-opacity': 0.8,
+        'border-color': '#CBD5E1',
+        'border-width': 2,
+        'border-style': 'dashed',
+        'label': 'data(label)',
+        'text-valign': 'top',
+        'text-halign': 'center',
+        'text-margin-y': -8,
+        'font-size': '13px',
+        'font-weight': '700',
+        'color': '#334155',
+        'padding': '24px'
+      }
+    },
+    // Special wrapper colors
+    { selector: 'node[id="FAM"]', style: { 'background-color': '#F0F9FF', 'border-color': '#BAE6FD', 'border-style': 'solid' } },
+    { selector: 'node[id="AIR"]', style: { 'background-color': '#FAF5FF', 'border-color': '#E9D5FF', 'border-style': 'solid' } },
+
+    // Edge Styles
+    {
+      selector: 'edge',
+      style: {
+        'width': 2,
+        'curve-style': 'bezier',
+        'label': 'data(label)',
+        'font-size': '9px',
+        'font-weight': '500',
+        'text-background-color': '#FFFFFF',
+        'text-background-opacity': 0.9,
+        'text-background-padding': '3px',
+        'text-border-radius': '3px',
+        'transition-property': 'opacity',
+        'transition-duration': '0.15s',
+      }
+    },
+    {
+      selector: 'edge[type = "fork"]',
+      style: { 'line-color': '#34D399', 'target-arrow-color': '#34D399', 'target-arrow-shape': 'triangle', 'line-style': 'dashed', 'color': '#059669' }
+    },
+    {
+      selector: 'edge[type = "next_version"]',
+      style: { 'line-color': '#94A3B8', 'target-arrow-color': '#94A3B8', 'target-arrow-shape': 'triangle', 'color': '#64748B' }
+    },
+    {
+      selector: 'edge[type = "pins"]',
+      style: {
+        'line-color': '#C4B5FD',
+        'target-arrow-color': '#C4B5FD',
+        'target-arrow-shape': 'vee',
+        'line-style': 'dashed',
+        'curve-style': 'unbundled-bezier',
+        'control-point-distances': [40, -40],
+        'control-point-weights': [0.25, 0.75],
+        'width': 2.5,
+        'color': '#7C3AED'
+      }
+    },
+
+    // Interactive states
+    { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#DB2777' } },
+    { selector: 'node.dimmed, edge.dimmed', style: { 'opacity': 0.15 } },
+    { selector: 'node.highlighted, edge.highlighted', style: { 'opacity': 1, 'z-index': 9999 } },
+    { selector: 'edge.highlighted[type="pins"]', style: { 'line-color': '#8B5CF6', 'target-arrow-color': '#8B5CF6', 'width': 3 } },
+    { selector: 'node.search-hit', style: { 'border-width': 3, 'border-color': '#D97706', 'background-color': '#FEF3C7', 'color': '#92400E' } }
+  ],
+  userZoomingEnabled: true,
+  userPanningEnabled: true,
+});
+
+// ── Layout Runner using Dagre (Strict LR) ────────────────────────────────────
+function runLayout() {
+  cy.layout({
+    name: 'dagre',
+    rankDir: 'LR',
+    align: 'UL',
+    ranker: 'network-simplex',
+    nodeSep: 60,
+    edgeSep: 40,
+    rankSep: 180,
+    padding: 60,
+    animate: true,
+    animationDuration: 600,
+    animationEasing: 'ease-out'
+  }).run();
+}
+
+// ── UI Interactions ───────────────────────────────────────────────────────────
+function toggleEdges(type) {
+  state[type] = !state[type];
+  const btnId = type === 'pins' ? 'btn-toggle-pins' : (type === 'fork' ? 'btn-toggle-forks' : 'btn-toggle-updates');
+  const btn = document.getElementById(btnId);
+  
+  if (state[type]) {
+    btn.classList.remove('active');
+    btn.textContent = `Hide ${type === 'pins' ? 'Pins' : (type === 'fork' ? 'Forks' : 'Minor/Major')}`;
+    cy.edges(`[type="${type}"]`).style('display', 'element');
+  } else {
+    btn.classList.add('active');
+    btn.textContent = `Show ${type === 'pins' ? 'Pins' : (type === 'fork' ? 'Forks' : 'Minor/Major')}`;
+    cy.edges(`[type="${type}"]`).style('display', 'none');
+  }
+}
+
+cy.on('mouseover', 'node', function(evt) {
+  const node = evt.target;
+  if (node.isParent()) return; // don't dim everything when hovering background boxes
+  
+  cy.elements().addClass('dimmed');
+  node.removeClass('dimmed').addClass('highlighted');
+  
+  // Highlight connected edges and nodes
+  node.connectedEdges(':visible').removeClass('dimmed').addClass('highlighted');
+  node.connectedEdges(':visible').connectedNodes(':visible').removeClass('dimmed').addClass('highlighted');
+  
+  // Bring parents back to normal opacity
+  node.parents().removeClass('dimmed');
+  node.connectedEdges(':visible').connectedNodes(':visible').parents().removeClass('dimmed');
+});
+
+cy.on('mouseout', 'node', function() {
+  cy.elements().removeClass('dimmed highlighted');
+});
+
+// ── Side Panel Logic ──────────────────────────────────────────────────────────
+const TYPE_LABELS = {
+  version_pub_global: 'Published Recipe (Global)',
+  version_pub_org:    'Published Recipe (Org)',
+  version_draft:      'Draft Recipe',
+  attr_v_initial:     'Attribute Snapshot (Initial)',
+  attr_v_minor:       'Attribute Snapshot (Minor)',
+  attr_v_major:       'Attribute Snapshot (Major)',
+  parent:             'Container / Subgraph'
+};
+
+const BADGE_CLASS = {
+  version_pub_global: 'chip-global',
+  version_pub_org:    'chip-org',
+  version_draft:      'chip-draft',
+  attr_v_initial:     'chip-initial',
+  attr_v_minor:       'chip-minor',
+  attr_v_major:       'chip-major',
+};
+
+cy.on('tap', 'node', function(evt) {
+  const nodeId = evt.target.id();
+  const nodeDef = NODE_MAP[nodeId];
+  if (!nodeDef || nodeDef.type === 'parent') return;
+
+  document.getElementById('panel-node-name').textContent = nodeDef.display || nodeDef.label;
+  const badge = BADGE_CLASS[nodeDef.type];
+  document.getElementById('panel-type-badge').innerHTML = `<span class="chip ${badge}">${TYPE_LABELS[nodeDef.type]}</span>`;
+
+  let html = '';
+  if (nodeDef.detail) {
+    for (const [k, v] of Object.entries(nodeDef.detail)) {
+      html += `<div class="pfield"><div class="pkey">${k}</div><div class="pval">${v}</div></div>`;
+    }
+  }
+
+  document.getElementById('panel-empty').style.display = 'none';
+  const content = document.getElementById('panel-content');
+  content.style.display = 'block';
+  content.innerHTML = html;
+});
+
+cy.on('tap', function(evt) {
+  if (evt.target === cy || (evt.target.isNode && evt.target.isParent())) {
+    document.getElementById('panel-node-name').textContent = '—';
+    document.getElementById('panel-type-badge').innerHTML = '';
+    document.getElementById('panel-empty').style.display = 'block';
+    document.getElementById('panel-content').style.display = 'none';
+  }
+});
+
+function searchNodes(query) {
+  cy.nodes().removeClass('search-hit');
+  if (!query.trim()) return;
+  const q = query.toLowerCase();
+  cy.nodes().forEach(node => {
+    const def = NODE_MAP[node.id()];
+    if (!def || def.type === 'parent') return;
+    const text = (def.label + ' ' + (def.display||'') + ' ' + JSON.stringify(def.detail || {})).toLowerCase();
+    if (text.includes(q)) node.addClass('search-hit');
+  });
+}
+
+// ── Initial Render ────────────────────────────────────────────────────────────
+cy.ready(() => {
+  runLayout();
+  // Small timeout to ensure bounds are calculated before fitting
+  setTimeout(() => cy.fit(cy.elements(), 40), 100);
+});
+
+</script>
+</body>
+</html>
