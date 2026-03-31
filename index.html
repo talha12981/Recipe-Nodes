@@ -8,9 +8,9 @@
   
   <!-- Core Cytoscape -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
-  <!-- Dagre Layout for strictly LR hierarchical graphs -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-dagre/2.5.0/cytoscape-dagre.min.js"></script>
+  <!-- Klay Layout for robust compound/hierarchical graphs -->
+  <script src="https://unpkg.com/klayjs@0.4.1/klay.js"></script>
+  <script src="https://unpkg.com/cytoscape-klay@3.1.4/cytoscape-klay.js"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -219,7 +219,7 @@
 </header>
 
 <div id="toolbar">
-  <button class="btn btn-accent" onclick="runLayout()">Re-Layout (Dagre)</button>
+  <button class="btn btn-accent" onclick="runLayout()">Re-Layout</button>
   <div class="sep"></div>
   <button class="btn" id="btn-toggle-pins" onclick="toggleEdges('pins')">Hide Pins</button>
   <button class="btn" id="btn-toggle-forks" onclick="toggleEdges('fork')">Hide Forks</button>
@@ -428,7 +428,7 @@ const cy = cytoscape({
         'font-size': '13px',
         'font-weight': '700',
         'color': '#334155',
-        'padding': '24px'
+        'padding': '30px'
       }
     },
     // Special wrapper colors
@@ -467,9 +467,7 @@ const cy = cytoscape({
         'target-arrow-color': '#C4B5FD',
         'target-arrow-shape': 'vee',
         'line-style': 'dashed',
-        'curve-style': 'unbundled-bezier',
-        'control-point-distances': [40, -40],
-        'control-point-weights': [0.25, 0.75],
+        'curve-style': 'bezier', // Cleaner curve style for pin edges
         'width': 2.5,
         'color': '#7C3AED'
       }
@@ -486,20 +484,22 @@ const cy = cytoscape({
   userPanningEnabled: true,
 });
 
-// ── Layout Runner using Dagre (Strict LR) ────────────────────────────────────
+// ── Layout Runner using KLAY (Excellent for Compound Graphs) ─────────────────
 function runLayout() {
   cy.layout({
-    name: 'dagre',
-    rankDir: 'LR',
-    align: 'UL',
-    ranker: 'network-simplex',
-    nodeSep: 60,
-    edgeSep: 40,
-    rankSep: 180,
-    padding: 60,
+    name: 'klay',
+    nodeDimensionsIncludeLabels: true,
     animate: true,
     animationDuration: 600,
-    animationEasing: 'ease-out'
+    klay: {
+      direction: 'RIGHT',
+      spacing: 80,
+      layoutHierarchy: true, // This is the secret sauce that prevents overlapping
+      edgeSpacingFactor: 1,
+      inLayerSpacingFactor: 1.5,
+      nodeLayering: 'NETWORK_SIMPLEX',
+      compactComponents: false
+    }
   }).run();
 }
 
